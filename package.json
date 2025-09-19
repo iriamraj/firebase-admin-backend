@@ -5,9 +5,8 @@
   "scripts": {
     "start": "node index.js"
   },
-  {
   "dependencies": {
-    "cloudinary": "^2.2.0", // Version might differ
+    "cloudinary": "^2.2.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "firebase-admin": "^12.1.1"
