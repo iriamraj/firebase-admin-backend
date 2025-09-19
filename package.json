@@ -5,9 +5,11 @@
   "scripts": {
     "start": "node index.js"
   },
+  {
   "dependencies": {
-    "express": "^4.18.2",
-    "firebase-admin": "^11.0.0",
-    "cors": "^2.8.5"
+    "cloudinary": "^2.2.0", // Version might differ
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.1.1"
   }
 }
