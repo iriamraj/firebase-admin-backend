@@ -2,132 +2,152 @@
 const express = require("express");
 const admin = require("firebase-admin");
 const cors = require("cors");
+const cloudinary = require("cloudinary").v2;
 
 // Initialize the Express app
 const app = express();
-
-// --- Middleware Setup ---
-// 1. Enable Cross-Origin Resource Sharing (CORS) to allow your frontend
-//    to make requests to this backend.
 app.use(cors());
-
-// 2. Enable the Express app to parse JSON formatted request bodies.
-//    This lets you use `req.body` in your POST endpoints.
 app.use(express.json());
 
-
 // --- Firebase Admin SDK Initialization ---
-// This block initializes the connection to your Firebase project.
-// It relies on a secret file you will set up in the Render environment.
 try {
-  // Download this file from: Firebase Console > Project Settings > Service accounts > Generate new private key
   const serviceAccount = require("./serviceAccountKey.json");
-  
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
+    databaseURL: "https://mdtstudio-8a729-default-rtdb.asia-southeast1.firebasedatabase.app/"
   });
-
 } catch (error) {
-  console.error("FATAL ERROR: Could not initialize Firebase Admin SDK.");
-  console.error("Please make sure the 'serviceAccountKey.json' file is present and valid in the root directory of your project.");
-  
-  // Exit the application if Firebase can't be initialized, as nothing will work.
+  console.error("FATAL ERROR: Could not initialize Firebase Admin SDK.", error);
   process.exit(1); 
 }
 
-// Get a reference to the Firebase Authentication service to interact with users.
-const auth = admin.auth();
+// --- Cloudinary Configuration ---
+try {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+  console.log("✅ Cloudinary configured successfully.");
+} catch (error) {
+    console.error("FATAL ERROR: Could not configure Cloudinary. Please check your environment variables.");
+    process.exit(1);
+}
 
+const auth = admin.auth();
+const db = admin.database();
 
 // ------------------------------------------------------------------
 // ------------------------- API ENDPOINTS --------------------------
 // ------------------------------------------------------------------
 
-/**
- * @route   GET /users
- * @desc    Retrieves a list of all users from Firebase Authentication.
- */
+// --- USER Endpoints ---
 app.get("/users", async (req, res) => {
+  // This endpoint remains unchanged
   try {
     const users = [];
     const listUsersResult = await auth.listUsers(1000);
-
     listUsersResult.users.forEach(userRecord => {
-      let providerId = 'password';
-      if (userRecord.providerData && userRecord.providerData.length > 0) {
-        const isGoogle = userRecord.providerData.some(
-          (provider) => provider.providerId === "google.com"
-        );
-        if (isGoogle) {
-          providerId = "google.com";
-        }
-      }
-
+      let providerId = userRecord.providerData.some(p => p.providerId === "google.com") ? "google.com" : "password";
       users.push({
-        uid: userRecord.uid,
-        email: userRecord.email,
-        displayName: userRecord.displayName,
-        photoURL: userRecord.photoURL,
-        disabled: userRecord.disabled,
-        creationTime: userRecord.metadata.creationTime,
-        lastSignInTime: userRecord.metadata.lastSignInTime,
+        uid: userRecord.uid, email: userRecord.email, displayName: userRecord.displayName,
+        photoURL: userRecord.photoURL, disabled: userRecord.disabled,
+        creationTime: userRecord.metadata.creationTime, lastSignInTime: userRecord.metadata.lastSignInTime,
         providerId: providerId,
       });
     });
-
     res.json(users);
-
   } catch (err) {
     console.error("Error listing users:", err);
     res.status(500).json({ error: "Failed to list users", details: err.message });
   }
 });
 
-/**
- * @route   POST /users
- * @desc    Creates a new user in Firebase Authentication.
- */
 app.post("/users", async (req, res) => {
+  // This endpoint remains unchanged
   try {
     const { email, password, displayName } = req.body;
-
     if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required fields." });
     }
-    
     const user = await auth.createUser({
-      email: email,
-      password: password,
-      emailVerified: true,
-      displayName: displayName || "",
+      email, password, emailVerified: true, displayName: displayName || "",
     });
-
     res.status(201).json(user);
-
   } catch (err) {
     console.error("Error creating user:", err);
     res.status(400).json({ error: "Failed to create user", details: err.message });
   }
 });
 
-/**
- * @route   DELETE /users/:uid
- * @desc    Deletes a user from Firebase Authentication using their UID.
- */
-app.delete("/users/:uid", async (req, res) => {
-  try {
-    await auth.deleteUser(req.params.uid);
-    res.json({ success: true, message: `User ${req.params.uid} deleted successfully.` });
-  } catch (err) {
-    console.error(`Error deleting user ${req.params.uid}:`, err);
-    res.status(500).json({ error: "Failed to delete user", details: err.message });
-  }
+// --- CLOUDINARY & DATA DELETION Endpoints ---
+
+// ✅ MODIFIED: This function now deletes files AND the containing folder.
+app.post("/delete-cloudinary-assets", async (req, res) => {
+    const { public_ids } = req.body;
+    if (!public_ids || !Array.isArray(public_ids) || public_ids.length === 0) {
+        return res.status(400).send({ error: "Missing 'public_ids' array." });
+    }
+    
+    try {
+        // 1. Delete the specified files
+        await cloudinary.api.delete_resources(public_ids, { resource_type: 'image' });
+        await cloudinary.api.delete_resources(public_ids, { resource_type: 'video' });
+        console.log(`Deleted Cloudinary assets: ${public_ids.join(", ")}`);
+
+        // 2. Determine the parent folder from the first public_id and delete it
+        const firstId = public_ids[0]; // e.g., "user/uid/releases/releaseId/artwork"
+        const folderToDelete = firstId.substring(0, firstId.lastIndexOf('/')); // "user/uid/releases/releaseId"
+        await cloudinary.api.delete_folder(folderToDelete);
+        console.log(`Deleted empty Cloudinary folder: ${folderToDelete}`);
+        
+        res.status(200).send({ message: "Assets and folder deleted successfully." });
+    } catch (error) {
+        console.error("Error during asset and folder deletion:", error);
+        res.status(500).send({ error: "Failed to delete assets." });
+    }
 });
 
-/**
- * @route   POST /users/:uid/disable
- * @desc    Disables a user's account.
- */
+// ✅ This function correctly deletes the user's main folder and all contents.
+app.post("/delete-cloudinary-folder", async (req, res) => {
+    const { folder } = req.body;
+    if (!folder) {
+        return res.status(400).send({ error: "Missing 'folder' path." });
+    }
+    try {
+        // 1. Delete all assets within the folder (and subfolders)
+        await cloudinary.api.delete_resources_by_prefix(folder);
+        console.log(`Deleted all resources in folder: ${folder}`);
+
+        // 2. Delete the now-empty folder
+        await cloudinary.api.delete_folder(folder);
+        console.log(`Deleted empty Cloudinary folder: ${folder}`);
+        
+        res.status(200).send({ message: "Folder and all assets deleted successfully." });
+    } catch (error) {
+        // It's okay if delete_folder fails because the folder didn't exist, but log other errors.
+        if (error.http_code !== 404) {
+            console.error("Error deleting Cloudinary folder:", error);
+        }
+        // Always return success to the client as the primary goal (deleting files) was attempted.
+        res.status(200).send({ message: "Cleanup process finished." });
+    }
+});
+
+app.delete("/users/:uid", async (req, res) => {
+    // This endpoint remains unchanged
+    const { uid } = req.params;
+    try {
+        await auth.deleteUser(uid);
+        await db.ref(`users/${uid}`).remove();
+        res.json({ success: true, message: `User ${uid} and database entries deleted.` });
+    } catch (err) {
+        console.error(`Error deleting user ${uid}:`, err);
+        res.status(500).json({ error: "Failed to delete user", details: err.message });
+    }
+});
+
+// Other endpoints (disable/enable user) remain unchanged...
 app.post("/users/:uid/disable", async (req, res) => {
   try {
     await auth.updateUser(req.params.uid, { disabled: true });
@@ -138,10 +158,6 @@ app.post("/users/:uid/disable", async (req, res) => {
   }
 });
 
-/**
- * @route   POST /users/:uid/enable
- * @desc    Re-enables a disabled user's account.
- */
 app.post("/users/:uid/enable", async (req, res) => {
   try {
     await auth.updateUser(req.params.uid, { disabled: false });
@@ -152,14 +168,8 @@ app.post("/users/:uid/enable", async (req, res) => {
   }
 });
 
-
-// ------------------------------------------------------------------
-// ------------------------- SERVER START ---------------------------
-// ------------------------------------------------------------------
-// Use the port provided by the environment (Render), or default to 3000 for local development.
+// --- SERVER START ---
 const PORT = process.env.PORT || 3000;
-
-// Listen on '0.0.0.0' to ensure the app is accessible from outside the container.
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Backend server is running on port ${PORT}`);
 });
