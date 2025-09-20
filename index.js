@@ -86,6 +86,8 @@ app.post("/users", async (req, res) => {
 });
 
 // --- CLOUDINARY & DATA DELETION Endpoints ---
+// --- In index.js, replace the existing /delete-cloudinary-assets endpoint with this ---
+
 app.post("/delete-cloudinary-assets", async (req, res) => {
     const { public_ids } = req.body;
     if (!public_ids || !Array.isArray(public_ids) || public_ids.length === 0) {
@@ -94,13 +96,26 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
 
     console.log(`[BACKEND] Received request to delete public_ids:`, public_ids);
 
-    try {
-        console.log(`[BACKEND] Deleting specific resources by type...`);
-        await cloudinary.api.delete_resources(public_ids, { resource_type: 'image', invalidate: true });
-        await cloudinary.api.delete_resources(public_ids, { resource_type: 'video', invalidate: true });
-        await cloudinary.api.delete_resources(public_ids, { resource_type: 'raw', invalidate: true });
-        console.log(`[BACKEND] Specific resources deletion commands sent.`);
+    // Use a helper function to avoid repeating code.
+    const deleteResourceByType = async (type) => {
+        try {
+            console.log(`[BACKEND] Attempting to delete as resource_type: '${type}'...`);
+            await cloudinary.api.delete_resources(public_ids, { resource_type: type, invalidate: true });
+        } catch (err) {
+            // Log a warning but do not stop the process. This is expected if an ID type doesn't match.
+            console.warn(`[BACKEND] WARN: Could not delete as type '${type}'. This is often normal if asset types don't match. Error:`, err.message);
+        }
+    };
 
+    try {
+        // --- STEP 1: Attempt to delete assets by trying all common types sequentially ---
+        await deleteResourceByType('image');
+        await deleteResourceByType('video');
+        await deleteResourceByType('raw'); // Crucial for audio files
+        
+        console.log(`[BACKEND] All resource deletion attempts completed.`);
+
+        // --- STEP 2: Attempt to delete the parent folder ---
         const firstId = public_ids[0];
         const folderToDelete = firstId.substring(0, firstId.lastIndexOf('/'));
         
@@ -110,18 +125,21 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
                 await cloudinary.api.delete_folder(folderToDelete);
                 console.log(`[BACKEND] Parent folder deletion command sent.`);
             } catch (folderError) {
-                console.warn(`[BACKEND] Could not delete folder (it might not be empty): ${folderError.message}`);
+                console.warn(`[BACKEND] WARN: Could not delete folder (it might not be empty or may have already been deleted). Error:`, folderError.message);
             }
         }
 
-        res.status(200).send({ message: "Assets and folder cleanup process initiated." });
+        // Always return success to the client, as the cleanup process has run.
+        res.status(200).send({ message: "Asset cleanup process finished." });
 
     } catch (error) {
+        // This outer catch will now only trigger for truly unexpected server errors.
         console.error("[BACKEND] FATAL Error during Cloudinary cleanup:", JSON.stringify(error, null, 2));
         const errorMessage = error.error?.message || error.message || "An unknown server error occurred.";
         res.status(500).send({ error: errorMessage });
     }
 });
+
 
 app.post("/delete-cloudinary-folder", async (req, res) => {
     const { folder } = req.body;
