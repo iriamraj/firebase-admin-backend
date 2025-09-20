@@ -94,28 +94,34 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
         return res.status(400).send({ error: "Missing 'public_ids' array." });
     }
 
-    console.log(`[BACKEND] Received request to delete public_ids:`, public_ids);
+    console.log(`[BACKEND] Received delete request for public_ids:`, public_ids);
+    const deletionResults = {};
 
-    // Use a helper function to avoid repeating code.
+    // Helper function to safely attempt deletion for a specific resource type
     const deleteResourceByType = async (type) => {
         try {
             console.log(`[BACKEND] Attempting to delete as resource_type: '${type}'...`);
-            await cloudinary.api.delete_resources(public_ids, { resource_type: type, invalidate: true });
+            const result = await cloudinary.api.delete_resources(public_ids, { resource_type: type, invalidate: true });
+            
+            // Log the detailed result from Cloudinary
+            console.log(`[BACKEND] SUCCESS for type '${type}'. Result:`, JSON.stringify(result, null, 2));
+            deletionResults[type] = result;
         } catch (err) {
-            // Log a warning but do not stop the process. This is expected if an ID type doesn't match.
-            console.warn(`[BACKEND] WARN: Could not delete as type '${type}'. This is often normal if asset types don't match. Error:`, err.message);
+            // Log the specific error for this type
+            console.error(`[BACKEND] ERROR deleting as type '${type}':`, JSON.stringify(err, null, 2));
+            deletionResults[type] = { error: err.message };
         }
     };
 
     try {
-        // --- STEP 1: Attempt to delete assets by trying all common types sequentially ---
+        // Run all deletion attempts
         await deleteResourceByType('image');
         await deleteResourceByType('video');
-        await deleteResourceByType('raw'); // Crucial for audio files
+        await deleteResourceByType('raw'); // For audio and other files
         
-        console.log(`[BACKEND] All resource deletion attempts completed.`);
+        console.log(`[BACKEND] All resource deletion attempts have completed.`);
 
-        // --- STEP 2: Attempt to delete the parent folder ---
+        // Attempt to delete the parent folder after trying to clear its contents
         const firstId = public_ids[0];
         const folderToDelete = firstId.substring(0, firstId.lastIndexOf('/'));
         
@@ -125,20 +131,20 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
                 await cloudinary.api.delete_folder(folderToDelete);
                 console.log(`[BACKEND] Parent folder deletion command sent.`);
             } catch (folderError) {
-                console.warn(`[BACKEND] WARN: Could not delete folder (it might not be empty or may have already been deleted). Error:`, folderError.message);
+                console.warn(`[BACKEND] WARN: Could not delete folder. Error:`, folderError.message);
             }
         }
 
-        // Always return success to the client, as the cleanup process has run.
-        res.status(200).send({ message: "Asset cleanup process finished." });
+        // Return a success response to the client with the detailed results
+        res.status(200).send({ message: "Asset cleanup process finished.", details: deletionResults });
 
-    } catch (error) {
-        // This outer catch will now only trigger for truly unexpected server errors.
-        console.error("[BACKEND] FATAL Error during Cloudinary cleanup:", JSON.stringify(error, null, 2));
-        const errorMessage = error.error?.message || error.message || "An unknown server error occurred.";
-        res.status(500).send({ error: errorMessage });
+    } catch (serverError) {
+        // This outer catch block is for truly unexpected server crashes
+        console.error("[BACKEND] UNEXPECTED FATAL SERVER ERROR during cleanup:", JSON.stringify(serverError, null, 2));
+        res.status(500).send({ error: "An unexpected server error occurred." });
     }
 });
+
 
 
 app.post("/delete-cloudinary-folder", async (req, res) => {
