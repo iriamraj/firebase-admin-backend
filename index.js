@@ -83,30 +83,53 @@ app.post("/users", async (req, res) => {
 // --- CLOUDINARY & DATA DELETION Endpoints ---
 
 // ✅ MODIFIED: This function now deletes files AND the containing folder.
+// --- In index.js, replace the existing /delete-cloudinary-assets endpoint with this ---
+
 app.post("/delete-cloudinary-assets", async (req, res) => {
     const { public_ids } = req.body;
     if (!public_ids || !Array.isArray(public_ids) || public_ids.length === 0) {
         return res.status(400).send({ error: "Missing 'public_ids' array." });
     }
-    
-    try {
-        // 1. Delete the specified files
-        await cloudinary.api.delete_resources(public_ids, { resource_type: 'image' });
-        await cloudinary.api.delete_resources(public_ids, { resource_type: 'video' });
-        console.log(`Deleted Cloudinary assets: ${public_ids.join(", ")}`);
 
-        // 2. Determine the parent folder from the first public_id and delete it
-        const firstId = public_ids[0]; // e.g., "user/uid/releases/releaseId/artwork"
-        const folderToDelete = firstId.substring(0, firstId.lastIndexOf('/')); // "user/uid/releases/releaseId"
-        await cloudinary.api.delete_folder(folderToDelete);
-        console.log(`Deleted empty Cloudinary folder: ${folderToDelete}`);
+    console.log(`[BACKEND] Received request to delete public_ids:`, public_ids);
+
+    try {
+        // --- STEP 1: Delete the specific assets by trying all common types ---
+        // This is the most robust way to ensure deletion, as Cloudinary will simply
+        // ignore types that don't match instead of throwing an error.
+        console.log(`[BACKEND] Deleting specific resources by type...`);
+        await cloudinary.api.delete_resources(public_ids, { resource_type: 'image', invalidate: true });
+        await cloudinary.api.delete_resources(public_ids, { resource_type: 'video', invalidate: true });
+        await cloudinary.api.delete_resources(public_ids, { resource_type: 'raw', invalidate: true }); // Crucial for audio files
+        console.log(`[BACKEND] Specific resources deletion commands sent.`);
+
+        // --- STEP 2: Delete the parent folder, which should now be empty ---
+        const firstId = public_ids[0];
+        const folderToDelete = firstId.substring(0, firstId.lastIndexOf('/'));
         
-        res.status(200).send({ message: "Assets and folder deleted successfully." });
+        if (folderToDelete) {
+            console.log(`[BACKEND] Attempting to delete parent folder: ${folderToDelete}`);
+            // This might fail if other files exist, but it's good for cleanup.
+            // We wrap it in a separate try/catch so it doesn't cause the whole request to fail.
+            try {
+                await cloudinary.api.delete_folder(folderToDelete);
+                console.log(`[BACKEND] Parent folder deletion command sent.`);
+            } catch (folderError) {
+                console.warn(`[BACKEND] Could not delete folder (it might not be empty): ${folderError.message}`);
+            }
+        }
+
+        res.status(200).send({ message: "Assets and folder cleanup process initiated." });
+
     } catch (error) {
-        console.error("Error during asset and folder deletion:", error);
-        res.status(500).send({ error: "Failed to delete assets." });
+        // This logs the full, detailed error from Cloudinary to your Render console.
+        console.error("[BACKEND] FATAL Error during Cloudinary cleanup:", JSON.stringify(error, null, 2));
+        
+        const errorMessage = error.error?.message || error.message || "An unknown server error occurred.";
+        res.status(500).send({ error: errorMessage });
     }
 });
+
 
 // ✅ This function correctly deletes the user's main folder and all contents.
 app.post("/delete-cloudinary-folder", async (req, res) => {
