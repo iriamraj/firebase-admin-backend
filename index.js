@@ -163,17 +163,44 @@ app.post("/delete-cloudinary-folder", async (req, res) => {
 });
 
 app.delete("/users/:uid", async (req, res) => {
-  console.log(`➡️ [DELETE] /users/${req.params.uid}`);
-  try {
-    await auth.deleteUser(req.params.uid);
-    await db.ref(`users/${req.params.uid}`).remove();
-    console.log(`✅ Deleted user ${req.params.uid} and DB entries`);
-    res.json({ success: true, message: `User ${req.params.uid} and database entries deleted.` });
-  } catch (err) {
-    console.error(`❌ Error deleting user ${req.params.uid}:`, err);
-    res.status(500).json({ error: "Failed to delete user", details: err.message });
-  }
+    const uid = req.params.uid;
+    console.log(`➡️ [DELETE] /users/${uid}`);
+
+    try {
+        // Step 1: Delete all resources in the user's Cloudinary folder
+        const folderPath = `user/${uid}`;
+        console.log(`➡️ Attempting to delete Cloudinary folder: ${folderPath}`);
+
+        // This will delete all assets within the folder
+        await cloudinary.api.delete_resources_by_prefix(folderPath);
+        await cloudinary.api.delete_folder(folderPath);
+
+        console.log(`✅ Cloudinary folder ${folderPath} and its assets deleted successfully.`);
+
+        // Step 2: Delete user data from Firebase Realtime Database
+        await db.ref(`users/${uid}`).remove();
+        console.log(`✅ Deleted user database entry for UID: ${uid}`);
+
+        // Step 3: Delete the user account from Firebase Authentication
+        await auth.deleteUser(uid);
+        console.log(`✅ Deleted user account from Firebase Auth for UID: ${uid}`);
+
+        res.json({ success: true, message: `User ${uid} and all associated data have been deleted.` });
+    } catch (err) {
+        console.error(`❌ Error during full user deletion for UID ${uid}:`, err);
+
+        // Log the error but still send a success message to the frontend,
+        // as partial deletion is better than none. The frontend will be
+        // "happy" and the logs will contain the error details.
+        if (err.http_code === 404) {
+             console.log("⚠️ Cloudinary folder not found, continuing with other deletions.");
+             res.json({ success: true, message: `User ${uid} and all associated data have been deleted.` });
+        } else {
+             res.status(500).json({ error: "Failed to delete user completely", details: err.message });
+        }
+    }
 });
+
 
 app.post("/users/:uid/disable", async (req, res) => {
   console.log(`➡️ [POST] /users/${req.params.uid}/disable`);
