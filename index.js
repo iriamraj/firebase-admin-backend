@@ -99,44 +99,31 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
     return res.status(400).send({ error: "Missing 'public_ids' array." });
   }
 
-  const deletionResults = {};
+  // Extract the common folder path from the public IDs
+  const firstId = public_ids[0];
+  const folderPath = firstId.includes('/') ? firstId.substring(0, firstId.lastIndexOf('/')) : '';
 
-  const deleteResourceByType = async (type) => {
-    try {
-      console.log(`➡️ Attempting deletion as resource_type='${type}'`);
-      const result = await cloudinary.api.delete_resources(public_ids, { resource_type: type, invalidate: true });
-      console.log(`✅ Deletion result for '${type}':`, JSON.stringify(result, null, 2));
-      deletionResults[type] = result;
-    } catch (err) {
-      console.error(`❌ Error deleting as '${type}':`, err);
-      deletionResults[type] = { error: err.message };
-    }
-  };
+  if (!folderPath) {
+    return res.status(400).send({ error: "Could not determine folder path from public IDs." });
+  }
 
   try {
-    await deleteResourceByType('image');
-    await deleteResourceByType('video');
-    await deleteResourceByType('raw');
+    console.log(`➡️ Attempting to delete all resources with prefix: '${folderPath}'`);
+    // Delete all resources within the specific folder
+    const result = await cloudinary.api.delete_resources_by_prefix(folderPath, {
+      type: 'upload',
+      resource_type: 'auto'
+    });
+    console.log(`✅ Deletion result for prefix '${folderPath}':`, JSON.stringify(result, null, 2));
 
-    console.log("✅ All deletion attempts completed.");
+    // Attempt to delete the now-empty folder
+    await cloudinary.api.delete_folder(folderPath);
+    console.log(`✅ Folder '${folderPath}' deleted successfully.`);
 
-    const firstId = public_ids[0];
-    const folderToDelete = firstId.includes("/") ? firstId.substring(0, firstId.lastIndexOf("/")) : null;
-
-    if (folderToDelete) {
-      console.log(`➡️ Attempting folder deletion: '${folderToDelete}'`);
-      try {
-        await cloudinary.api.delete_folder(folderToDelete);
-        console.log("✅ Folder deleted:", folderToDelete);
-      } catch (folderError) {
-        console.warn("⚠️ Could not delete folder:", folderError.message);
-      }
-    }
-
-    res.status(200).send({ message: "Asset cleanup process finished.", details: deletionResults });
-  } catch (serverError) {
-    console.error("❌ UNEXPECTED server error during cleanup:", serverError);
-    res.status(500).send({ error: "An unexpected server error occurred." });
+    res.status(200).send({ message: "Release assets and folder deleted successfully.", details: result });
+  } catch (err) {
+    console.error("❌ Error deleting Cloudinary assets and folder:", err);
+    res.status(500).send({ error: "Failed to delete Cloudinary assets and folder.", details: err.message, http_code: err.http_code });
   }
 });
 
