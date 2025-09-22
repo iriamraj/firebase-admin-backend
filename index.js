@@ -115,11 +115,11 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
     console.log("➡️ [POST] /delete-cloudinary-assets with body:", req.body);
 
     const { artworkUrl, audioUrl } = req.body;
-    const public_ids = [];
 
-    // Extract public IDs from URLs and add them to the array
+    // Helper function to extract public ID
     const extractPublicIdFromUrl = (url) => {
         if (!url) return null;
+        // This regex now correctly extracts the public ID regardless of file extension
         const regex = /upload\/(?:v\d+\/)?(.+?)\.[^.]+$/;
         const match = url.match(regex);
         return match ? match[1] : null;
@@ -128,25 +128,35 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
     const artworkId = extractPublicIdFromUrl(artworkUrl);
     const audioId = extractPublicIdFromUrl(audioUrl);
 
-    if (artworkId) public_ids.push(artworkId);
-    if (audioId) public_ids.push(audioId);
-
-    if (public_ids.length === 0) {
-        return res.status(200).send({ message: "No assets to delete." });
-    }
+    let results = {};
 
     try {
-        console.log(`➡️ Attempting to delete Cloudinary assets with IDs: ${public_ids.join(', ')}`);
-        // Delete the specified resources
-        const result = await cloudinary.api.delete_resources(public_ids);
-        console.log(`✅ Deletion result:`, JSON.stringify(result, null, 2));
+        // Step 1: Delete the artwork (image)
+        if (artworkId) {
+            console.log(`➡️ Attempting to delete image with ID: ${artworkId}`);
+            results.artwork = await cloudinary.api.delete_resources([artworkId], {
+                resource_type: 'image'
+            });
+            console.log(`✅ Artwork deletion result:`, JSON.stringify(results.artwork, null, 2));
+        }
 
-        res.status(200).send({ message: "Assets deleted successfully.", details: result });
+        // Step 2: Delete the audio (video/raw)
+        if (audioId) {
+            console.log(`➡️ Attempting to delete audio with ID: ${audioId}`);
+            // Use 'video' for audio files like .wav
+            results.audio = await cloudinary.api.delete_resources([audioId], {
+                resource_type: 'video'
+            });
+            console.log(`✅ Audio deletion result:`, JSON.stringify(results.audio, null, 2));
+        }
+
+        res.status(200).send({ message: "Assets deleted successfully.", details: results });
     } catch (err) {
         console.error("❌ Error deleting Cloudinary assets:", err);
         res.status(500).send({ error: "Failed to delete Cloudinary assets.", details: err.message, http_code: err.http_code });
     }
 });
+
 
 
 app.post("/users/:uid/disable", async (req, res) => {
