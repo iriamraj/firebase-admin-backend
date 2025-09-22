@@ -99,18 +99,11 @@ app.delete("/users/:uid", async (req, res) => {
         console.log(`➡️ Attempting to delete Cloudinary folder: ${folderPath}`);
 
         try {
-            // This will delete all assets within the folder
             await cloudinary.api.delete_resources_by_prefix(folderPath);
-            console.log(`✅ Cloudinary assets in folder ${folderPath} deleted successfully.`);
-            
-            // Delete the now-empty folder
             await cloudinary.api.delete_folder(folderPath);
-            console.log(`✅ Cloudinary folder ${folderPath} deleted successfully.`);
-            
+            console.log(`✅ Cloudinary assets and folder ${folderPath} deleted successfully.`);
         } catch (cloudinaryErr) {
-            // This block handles specific Cloudinary errors, allowing the process to continue.
             console.error(`❌ Cloudinary deletion failed for UID ${uid}:`, cloudinaryErr.message);
-            // The process will continue to delete from Firebase regardless of this error.
         }
 
         // Step 2: Delete user data from Firebase Realtime Database
@@ -151,6 +144,62 @@ app.post("/users/:uid/enable", async (req, res) => {
     console.error(`❌ Error enabling user ${req.params.uid}:`, err);
     res.status(500).json({ error: "Failed to enable user", details: err.message });
   }
+});
+
+
+// --- NEW: CLOUDINARY ASSET DELETION Endpoint ---
+app.post("/delete-cloudinary-assets", async (req, res) => {
+    console.log("➡️ [POST] /delete-cloudinary-assets with body:", req.body);
+
+    const { artworkUrl, audioUrl } = req.body;
+
+    // Helper function to extract public ID
+    const extractPublicIdFromUrl = (url) => {
+        if (!url) return null;
+        const regex = /upload\/(?:v\d+\/)?(.+?)\.[^.]+$/;
+        const match = url.match(regex);
+        return match ? match[1] : null;
+    };
+
+    const artworkId = extractPublicIdFromUrl(artworkUrl);
+    const audioId = extractPublicIdFromUrl(audioUrl);
+
+    let results = {};
+
+    try {
+        // Step 1: Delete the artwork (image)
+        if (artworkId) {
+            console.log(`➡️ Attempting to delete image with ID: ${artworkId}`);
+            results.artwork = await cloudinary.api.delete_resources([artworkId], {
+                resource_type: 'image'
+            });
+            console.log(`✅ Artwork deletion result:`, JSON.stringify(results.artwork, null, 2));
+        }
+
+        // Step 2: Delete the audio (video/raw)
+        if (audioId) {
+            console.log(`➡️ Attempting to delete audio with ID: ${audioId}`);
+            results.audio = await cloudinary.api.delete_resources([audioId], {
+                resource_type: 'video'
+            });
+            console.log(`✅ Audio deletion result:`, JSON.stringify(results.audio, null, 2));
+        }
+
+        res.status(200).send({ message: "Assets deleted successfully.", details: results });
+    } catch (err) {
+        console.error("❌ Error deleting Cloudinary assets:", err);
+        res.status(500).send({ error: "Failed to delete Cloudinary assets.", details: err.message, http_code: err.http_code });
+    }
+});
+
+
+// --- GLOBAL ERROR HANDLER ---
+app.use((err, req, res, next) => {
+    console.error("❌ An unhandled error occurred:", err);
+    res.status(500).json({
+        error: "Internal Server Error",
+        details: err.message,
+    });
 });
 
 // --- SERVER START ---
