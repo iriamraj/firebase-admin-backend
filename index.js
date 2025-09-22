@@ -96,12 +96,21 @@ app.delete("/users/:uid", async (req, res) => {
     try {
         // Step 1: Delete all resources in the user's Cloudinary folder
         const folderPath = `user/${uid}`;
-        console.log(`➡️ Attempting to delete Cloudinary folder: ${folderPath}`);
+        console.log(`➡️ Attempting to delete Cloudinary assets from folder: ${folderPath}`);
 
         try {
-            await cloudinary.api.delete_resources_by_prefix(folderPath);
+            // Delete images in the folder
+            await cloudinary.api.delete_resources_by_prefix(folderPath, { resource_type: 'image' });
+            console.log(`✅ Cloudinary images in folder ${folderPath} deleted successfully.`);
+
+            // Delete video/audio files in the folder
+            await cloudinary.api.delete_resources_by_prefix(folderPath, { resource_type: 'video' });
+            console.log(`✅ Cloudinary audio/video in folder ${folderPath} deleted successfully.`);
+
+            // Now that the folder is empty, delete it
             await cloudinary.api.delete_folder(folderPath);
-            console.log(`✅ Cloudinary assets and folder ${folderPath} deleted successfully.`);
+            console.log(`✅ Cloudinary folder ${folderPath} deleted successfully.`);
+
         } catch (cloudinaryErr) {
             console.error(`❌ Cloudinary deletion failed for UID ${uid}:`, cloudinaryErr.message);
         }
@@ -120,6 +129,7 @@ app.delete("/users/:uid", async (req, res) => {
         res.status(500).json({ error: "Failed to delete user completely", details: err.message });
     }
 });
+
 
 
 app.post("/users/:uid/disable", async (req, res) => {
