@@ -106,7 +106,7 @@ app.delete("/users/:uid", async (req, res) => {
             // Delete the now-empty folder
             await cloudinary.api.delete_folder(folderPath);
             console.log(`✅ Cloudinary folder ${folderPath} deleted successfully.`);
-
+            
         } catch (cloudinaryErr) {
             // This block handles specific Cloudinary errors, allowing the process to continue.
             console.error(`❌ Cloudinary deletion failed for UID ${uid}:`, cloudinaryErr.message);
@@ -124,16 +124,7 @@ app.delete("/users/:uid", async (req, res) => {
         res.json({ success: true, message: `User ${uid} and all associated data have been deleted.` });
     } catch (err) {
         console.error(`❌ Error during full user deletion for UID ${uid}:`, err);
-
-        // Log the error but still send a success message to the frontend,
-        // as partial deletion is better than none. The frontend will be
-        // "happy" and the logs will contain the error details.
-        if (err.http_code === 404) {
-             console.log("⚠️ Cloudinary folder not found, continuing with other deletions.");
-             res.json({ success: true, message: `User ${uid} and all associated data have been deleted.` });
-        } else {
-             res.status(500).json({ error: "Failed to delete user completely", details: err.message });
-        }
+        res.status(500).json({ error: "Failed to delete user completely", details: err.message });
     }
 });
 
