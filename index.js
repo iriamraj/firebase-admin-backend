@@ -98,11 +98,20 @@ app.delete("/users/:uid", async (req, res) => {
         const folderPath = `user/${uid}`;
         console.log(`➡️ Attempting to delete Cloudinary folder: ${folderPath}`);
 
-        // This will delete all assets within the folder
-        await cloudinary.api.delete_resources_by_prefix(folderPath);
-        await cloudinary.api.delete_folder(folderPath);
+        try {
+            // This will delete all assets within the folder
+            await cloudinary.api.delete_resources_by_prefix(folderPath);
+            console.log(`✅ Cloudinary assets in folder ${folderPath} deleted successfully.`);
+            
+            // Delete the now-empty folder
+            await cloudinary.api.delete_folder(folderPath);
+            console.log(`✅ Cloudinary folder ${folderPath} deleted successfully.`);
 
-        console.log(`✅ Cloudinary folder ${folderPath} and its assets deleted successfully.`);
+        } catch (cloudinaryErr) {
+            // This block handles specific Cloudinary errors, allowing the process to continue.
+            console.error(`❌ Cloudinary deletion failed for UID ${uid}:`, cloudinaryErr.message);
+            // The process will continue to delete from Firebase regardless of this error.
+        }
 
         // Step 2: Delete user data from Firebase Realtime Database
         await db.ref(`users/${uid}`).remove();
