@@ -2,7 +2,6 @@
 const express = require("express");
 const admin = require("firebase-admin");
 const cors = require("cors");
-const cloudinary = require("cloudinary").v2;
 
 // Initialize the Express app
 const app = express();
@@ -20,24 +19,6 @@ try {
 } catch (error) {
   console.error("❌ FATAL ERROR: Could not initialize Firebase Admin SDK.", error);
   process.exit(1); 
-}
-
-// --- Cloudinary Configuration ---
-try {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-  });
-
-  if (!cloudinary.config().cloud_name || !cloudinary.config().api_key || !cloudinary.config().api_secret) {
-    throw new Error("One or more Cloudinary environment variables are not set.");
-  }
-
-  console.log("✅ Cloudinary configured successfully.");
-} catch (error) {
-  console.error("❌ FATAL ERROR: Could not configure Cloudinary.", error.message);
-  process.exit(1);
 }
 
 const auth = admin.auth();
@@ -89,102 +70,23 @@ app.post("/users", async (req, res) => {
   }
 });
 
-// --- CLOUDINARY & DATA DELETION Endpoints ---
-app.post("/delete-cloudinary-assets", async (req, res) => {
-  console.log("➡️ [POST] /delete-cloudinary-assets with body:", req.body);
-
-  const { public_ids } = req.body;
-  if (!public_ids || !Array.isArray(public_ids) || public_ids.length === 0) {
-    console.warn("⚠️ Invalid or missing 'public_ids' array.");
-    return res.status(400).send({ error: "Missing 'public_ids' array." });
-  }
-
-  // Extract the common folder path from the public IDs
-  const firstId = public_ids[0];
-  const folderPath = firstId.includes('/') ? firstId.substring(0, firstId.lastIndexOf('/')) : '';
-
-  if (!folderPath) {
-    return res.status(400).send({ error: "Could not determine folder path from public IDs." });
-  }
-
-  try {
-    console.log(`➡️ Attempting to delete all resources with prefix: '${folderPath}'`);
-    // Delete all resources within the specific folder
-    const result = await cloudinary.api.delete_resources_by_prefix(folderPath, {
-      type: 'upload',
-      resource_type: 'auto'
-    });
-    console.log(`✅ Deletion result for prefix '${folderPath}':`, JSON.stringify(result, null, 2));
-
-    // Attempt to delete the now-empty folder
-    await cloudinary.api.delete_folder(folderPath);
-    console.log(`✅ Folder '${folderPath}' deleted successfully.`);
-
-    res.status(200).send({ message: "Release assets and folder deleted successfully.", details: result });
-  } catch (err) {
-    console.error("❌ Error deleting Cloudinary assets and folder:", err);
-    res.status(500).send({ error: "Failed to delete Cloudinary assets and folder.", details: err.message, http_code: err.http_code });
-  }
-});
-
-app.post("/delete-cloudinary-folder", async (req, res) => {
-  console.log("➡️ [POST] /delete-cloudinary-folder with body:", req.body);
-
-  const { folder } = req.body;
-  if (!folder) {
-    console.warn("⚠️ Missing 'folder' in body.");
-    return res.status(400).send({ error: "Missing 'folder' path." });
-  }
-
-  try {
-    await cloudinary.api.delete_resources_by_prefix(folder);
-    console.log(`✅ Deleted all resources in folder: ${folder}`);
-    await cloudinary.api.delete_folder(folder);
-    console.log(`✅ Deleted folder: ${folder}`);
-
-    res.status(200).send({ message: "Folder and all assets deleted successfully." });
-  } catch (error) {
-    console.error("❌ Error deleting folder:", error);
-    res.status(200).send({ message: "Cleanup process finished." });
-  }
-});
-
 app.delete("/users/:uid", async (req, res) => {
     const uid = req.params.uid;
     console.log(`➡️ [DELETE] /users/${uid}`);
 
     try {
-        // Step 1: Delete all resources in the user's Cloudinary folder
-        const folderPath = `user/${uid}`;
-        console.log(`➡️ Attempting to delete Cloudinary folder: ${folderPath}`);
-
-        // This will delete all assets within the folder
-        await cloudinary.api.delete_resources_by_prefix(folderPath);
-        await cloudinary.api.delete_folder(folderPath);
-
-        console.log(`✅ Cloudinary folder ${folderPath} and its assets deleted successfully.`);
-
-        // Step 2: Delete user data from Firebase Realtime Database
+        // Step 1: Delete user data from Firebase Realtime Database
         await db.ref(`users/${uid}`).remove();
         console.log(`✅ Deleted user database entry for UID: ${uid}`);
 
-        // Step 3: Delete the user account from Firebase Authentication
+        // Step 2: Delete the user account from Firebase Authentication
         await auth.deleteUser(uid);
         console.log(`✅ Deleted user account from Firebase Auth for UID: ${uid}`);
 
         res.json({ success: true, message: `User ${uid} and all associated data have been deleted.` });
     } catch (err) {
         console.error(`❌ Error during full user deletion for UID ${uid}:`, err);
-
-        // Log the error but still send a success message to the frontend,
-        // as partial deletion is better than none. The frontend will be
-        // "happy" and the logs will contain the error details.
-        if (err.http_code === 404) {
-             console.log("⚠️ Cloudinary folder not found, continuing with other deletions.");
-             res.json({ success: true, message: `User ${uid} and all associated data have been deleted.` });
-        } else {
-             res.status(500).json({ error: "Failed to delete user completely", details: err.message });
-        }
+        res.status(500).json({ error: "Failed to delete user", details: err.message });
     }
 });
 
