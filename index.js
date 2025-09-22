@@ -91,6 +91,49 @@ app.delete("/users/:uid", async (req, res) => {
 });
 
 
+// Add this code block after your existing user-related endpoints
+
+// --- NEW: CLOUDINARY ASSET DELETION Endpoint ---
+app.post("/delete-cloudinary-assets", async (req, res) => {
+    console.log("➡️ [POST] /delete-cloudinary-assets with body:", req.body);
+
+    const { artworkUrl, audioUrl } = req.body;
+    const public_ids = [];
+
+    // Extract public IDs from URLs and add them to the array
+    const extractPublicIdFromUrl = (url) => {
+        if (!url) return null;
+        const regex = /upload\/(?:v\d+\/)?(.+?)\.[^.]+$/;
+        const match = url.match(regex);
+        return match ? match[1] : null;
+    };
+
+    const artworkId = extractPublicIdFromUrl(artworkUrl);
+    const audioId = extractPublicIdFromUrl(audioUrl);
+
+    if (artworkId) public_ids.push(artworkId);
+    if (audioId) public_ids.push(audioId);
+
+    if (public_ids.length === 0) {
+        return res.status(200).send({ message: "No assets to delete." });
+    }
+
+    try {
+        console.log(`➡️ Attempting to delete Cloudinary assets with IDs: ${public_ids.join(', ')}`);
+        // Delete the specified resources
+        const result = await cloudinary.api.delete_resources(public_ids);
+        console.log(`✅ Deletion result:`, JSON.stringify(result, null, 2));
+
+        res.status(200).send({ message: "Assets deleted successfully.", details: result });
+    } catch (err) {
+        console.error("❌ Error deleting Cloudinary assets:", err);
+        res.status(500).send({ error: "Failed to delete Cloudinary assets.", details: err.message, http_code: err.http_code });
+    }
+});
+
+
+
+
 app.post("/users/:uid/disable", async (req, res) => {
   console.log(`➡️ [POST] /users/${req.params.uid}/disable`);
   try {
