@@ -2,6 +2,7 @@
 const express = require("express");
 const admin = require("firebase-admin");
 const cors = require("cors");
+const cloudinary = require("cloudinary").v2; // ADDED: Cloudinary import
 
 // Initialize the Express app
 const app = express();
@@ -18,7 +19,23 @@ try {
   console.log("✅ Firebase Admin SDK initialized successfully.");
 } catch (error) {
   console.error("❌ FATAL ERROR: Could not initialize Firebase Admin SDK.", error);
-  process.exit(1); 
+  process.exit(1);
+}
+
+// --- ADDED: Cloudinary Configuration ---
+try {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+  if (!cloudinary.config().cloud_name || !cloudinary.config().api_key || !cloudinary.config().api_secret) {
+    throw new Error("One or more Cloudinary environment variables are not set.");
+  }
+  console.log("✅ Cloudinary configured successfully.");
+} catch (error) {
+  console.error("❌ FATAL ERROR: Could not configure Cloudinary.", error.message);
+  process.exit(1);
 }
 
 const auth = admin.auth();
@@ -130,8 +147,6 @@ app.post("/delete-cloudinary-assets", async (req, res) => {
         res.status(500).send({ error: "Failed to delete Cloudinary assets.", details: err.message, http_code: err.http_code });
     }
 });
-
-
 
 
 app.post("/users/:uid/disable", async (req, res) => {
